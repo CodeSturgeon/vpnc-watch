@@ -3,6 +3,9 @@
 ## Copyright (C) 2006 Red Hat, Inc.
 ## Written by Gary Benson <gbenson@redhat.com>
 ##
+## Updated for vpnc error retry by Nick Fisher
+##     http://github.com/CodeSturgeon/vpnc-watch
+##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
 ## the Free Software Foundation; either version 2 of the License, or
@@ -21,6 +24,9 @@ import time
 import traceback
 
 class Error(Exception):
+    pass
+
+class RunError(Exception): # Specifically for vpnc errors
     pass
 
 def which(cmd):
@@ -63,6 +69,8 @@ class Watcher:
         syslog.syslog(syslog.LOG_NOTICE, "starting %s" % self.name)
         pid = os.fork()
         if pid == 0:
+            # If this is the child process
+            # replace this process with vpnc process
             os.execv(self.cmd, [self.name] + self.args)
         status = os.waitpid(pid, 0)[1]
         if os.WIFSIGNALED(status):
@@ -72,7 +80,7 @@ class Watcher:
             raise RuntimeError, "os.waitpid returned %d" % status
         status = os.WEXITSTATUS(status)
         if status:
-            raise Error, "%s exited with code %d" % (self.cmd, status)
+            raise RunError, "%s exited with code %d" % (self.cmd, status)
         pids = pidof(self.cmd)
         if not pids:
             raise Error, "%s is not running!" % self.cmd
@@ -123,8 +131,9 @@ class Watcher:
         if pids:
             pids = ", ".join(map(str, pids))
             raise Error, "%s already running (%s)" % (self.cmd, pids)
-        self.start()
+        self.start() # FIXME not caught!
         self.detach()
+        retrys = 0 # Init the retry counter
         try:
             signal.signal(signal.SIGHUP, self.signal)
             signal.signal(signal.SIGTERM, self.signal)
@@ -140,7 +149,15 @@ class Watcher:
                 elif self.do_exit or self.do_restart:
                     self.stop()
                 if self.do_restart or not running:
-                    self.start()
+                    try:
+                        self.start()
+                    except RunError, e:
+                        if retrys == 3:
+                            raise e # re-raise if we failed 3 times in a row
+                        syslog.syslog(syslog.LOG_INFO, "vpnc failed, retry")
+                        retrys += 1
+                    else:
+                        retrys = 0 # Reset the retry counter
             syslog.syslog(syslog.LOG_INFO, "exiting")
 
         except Error, e:
