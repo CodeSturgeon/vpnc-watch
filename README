@@ -1,0 +1,7 @@
+Purpose: have vpnc-watch retry vpnc command rather than fail if there is an error.
+
+Announce post:
+http://lists.unix-ag.uni-kl.de/pipermail/vpnc-devel/2006-August/000990.html
+
+Original script location:
+http://inauspicious.org/files/scripts/vpnc-watch.py
